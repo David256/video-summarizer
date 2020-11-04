@@ -1,0 +1,179 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+
+import argparse
+import subprocess
+import re
+import time
+import os
+import sys
+import multiprocessing
+
+parser = argparse.ArgumentParser(description="Video Summarizer CLI")
+
+parser.add_argument(
+	"input",
+	help="Input filename")
+parser.add_argument(
+	"output",
+	help="Output filename")
+parser.add_argument(
+	"-p",
+	"--parts",
+	type=int,
+	dest="parts",
+	default=5,
+	help="Number of parts to split the video")
+parser.add_argument(
+	"-q",
+	"--quiet",
+	nargs="?",
+	dest="quiet",
+	default=False,
+	const=True,
+	help="Quiet")
+parser.add_argument(
+	"-s",
+	"--seconds",
+	dest="seconds",
+	type=int,
+	default=1,
+	help="Time in second to each parts")
+parser.add_argument(
+	"-na",
+	"--no-audio",
+	dest="no_audio",
+	nargs="?",
+	default=False,
+	const=True,
+	help="Disable audio channel in the video")
+parser.add_argument(
+	"-t",
+	"--threads",
+	dest="threads",
+	default=1,
+	type=int,
+	help="Number of threads to work")
+
+config = parser.parse_args()
+
+if not config.quiet:
+	print("Video input:", config.input)
+	print("Video output:", config.output)
+	print("Parts:", config.parts)
+	print("Seconds:", config.seconds)
+	print("Disable audio:", config.no_audio)
+	print("Threads:", config.threads)
+
+# Ok, next
+
+t = time.time()
+stderr = "/tmp/video_summary_stderr_{t}".format(t=t)
+stdout_format = "/tmp/video_summary_parts_{p}_{t}{ext}"
+summary_list = "/tmp/summary_list_{t}".format(t=t)
+re_duration = re.compile(r"Duration: (\d+):(\d+):(\d+(\.\d+)?)")
+
+command = [
+	"ffmpeg", "-i",
+	config.input]
+
+with open(stderr, "w") as fd:
+	process = subprocess.Popen(command, stderr=fd)
+	process.wait()
+
+# Read the duration
+with open(stderr, "r") as fd:
+	content = fd.read()
+
+# Get the values of the duration
+matched = re_duration.search(content)
+if not matched:
+	if not config.quiet:
+		print("Can not read the duration of video", file=sys.stderr)
+	if os.path.exists(stderr):
+		os.remove(stderr)
+	exit(-1)
+
+# Get the time by parts
+hours, minutes, seconds, _ = matched.groups()
+
+# Get the total of seconds
+total_seconds = float(hours)*3600 + float(minutes)*60 + float(seconds)
+
+# If the video is too short we do nothing
+if total_seconds < 30:
+	print("Video too short", file=sys.stderr)
+	exit(-1)
+
+# Calc the parts
+step = total_seconds / config.parts
+parts = list()
+offset = 2
+for i in range(config.parts):
+	parts.append([offset, offset + config.seconds])
+	offset += step
+
+# Method to work in splitting
+def work_in_splitting(input, ss, to, no_audio, output):
+	if not config.quiet:
+		print(os.getpid(), "says:")
+		print("Saving part in:", output)
+		print("From", ss, "to", to)
+	command = [
+		"ffmpeg",
+		"-i", input,
+		"-ss", str(ss),
+		"-to", str(to),
+		"-y"]
+	if no_audio:
+		command.append("-na")
+	command.append(output)
+	process = subprocess.Popen(command, stderr=subprocess.DEVNULL)
+	process.wait()
+	return output
+
+# Split the video
+args_s = []
+for p,(ss,to) in enumerate(parts):
+	_,ext = os.path.splitext(config.output)
+	output = stdout_format.format(p=p, t=t, ext=ext)
+	args_s.append((config.input, ss, to, config.no_audio, output))
+
+# Create a list of videos
+with multiprocessing.Pool(processes=config.threads) as pool:
+	splitted_videos = pool.starmap(work_in_splitting, args_s)
+
+with open(summary_list, "w") as fd:
+	for output in splitted_videos:
+		fd.write("file '%s'\n" % output)
+
+# Join all videos
+command = [
+	"ffmpeg",
+	"-f", "concat",
+	"-safe", "0",
+	"-i", summary_list,
+	"-y",
+	config.output]
+if not config.quiet:
+	print("Joining...")
+process = subprocess.Popen(command, stderr=subprocess.DEVNULL)
+process.wait()
+if not config.quiet:
+	print("Joint.")
+
+
+# Finish
+if os.path.exists(stderr):
+	if not config.quiet:
+		print("Deleting", stderr)
+	os.remove(stderr)
+if os.path.exists(summary_list):
+	if not config.quiet:
+		print("Deleting", summary_list)
+	os.remove(summary_list)
+for output in splitted_videos:
+	if os.path.exists(output):
+		if not config.quiet:
+			print("Deleting", output)
+		os.remove(output)
