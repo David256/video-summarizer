@@ -2,7 +2,7 @@
 
 This tool lets you create a video summary. You can set the amount of parts and the time of this. Also, you can set if you want audio channel and how much threads will be used.
 
-```bash
+```
 usage: video-summarizer [-h] [-p PARTS] [-q [QUIET]] [-s SECONDS]
                         [-na [NO_AUDIO]] [-t THREADS]
                         input output
