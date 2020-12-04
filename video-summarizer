@@ -36,7 +36,7 @@ parser.add_argument(
 	"-s",
 	"--seconds",
 	dest="seconds",
-	type=int,
+	type=float,
 	default=1,
 	help="Time in second to each parts")
 parser.add_argument(
