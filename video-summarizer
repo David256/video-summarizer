@@ -20,7 +20,7 @@ parser.add_argument(
 parser.add_argument(
 	"-p",
 	"--parts",
-	type=float,
+	type=int,
 	dest="parts",
 	default=5,
 	help="Number of parts to split the video")
